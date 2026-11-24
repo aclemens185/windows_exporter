@@ -31,14 +31,14 @@ type perfDataCounterValues struct {
 	DataBytesPerSec                            float64 `perfdata:"Data Bytes/sec"`
 	DataRequestsPerSec                         float64 `perfdata:"Data Requests/sec"`
 	MetadataRequestsPerSec                     float64 `perfdata:"Metadata Requests/sec"`
-	ReadBytesTransmittedViaSMBDirectPerSec     float64 `perfdata:"Read Bytes transmitted via SMB Direct/sec"`
+	ReadBytesTransmittedViaSMBDirectPerSec     float64 `perfdata:"Read Bytes transmitted via SMB Direct/sec"     perfdata_min_build:"17763"`
 	ReadBytesPerSec                            float64 `perfdata:"Read Bytes/sec"`
-	ReadRequestsTransmittedViaSMBDirectPerSec  float64 `perfdata:"Read Requests transmitted via SMB Direct/sec"`
+	ReadRequestsTransmittedViaSMBDirectPerSec  float64 `perfdata:"Read Requests transmitted via SMB Direct/sec"  perfdata_min_build:"17763"`
 	ReadRequestsPerSec                         float64 `perfdata:"Read Requests/sec"`
-	TurboIOReadsPerSec                         float64 `perfdata:"Turbo I/O Reads/sec"`
-	TurboIOWritesPerSec                        float64 `perfdata:"Turbo I/O Writes/sec"`
-	WriteBytesTransmittedViaSMBDirectPerSec    float64 `perfdata:"Write Bytes transmitted via SMB Direct/sec"`
+	TurboIOReadsPerSec                         float64 `perfdata:"Turbo I/O Reads/sec"                           perfdata_min_build:"17763"`
+	TurboIOWritesPerSec                        float64 `perfdata:"Turbo I/O Writes/sec"                          perfdata_min_build:"17763"`
+	WriteBytesTransmittedViaSMBDirectPerSec    float64 `perfdata:"Write Bytes transmitted via SMB Direct/sec"    perfdata_min_build:"17763"`
 	WriteBytesPerSec                           float64 `perfdata:"Write Bytes/sec"`
-	WriteRequestsTransmittedViaSMBDirectPerSec float64 `perfdata:"Write Requests transmitted via SMB Direct/sec"`
+	WriteRequestsTransmittedViaSMBDirectPerSec float64 `perfdata:"Write Requests transmitted via SMB Direct/sec" perfdata_min_build:"17763"`
 	WriteRequestsPerSec                        float64 `perfdata:"Write Requests/sec"`
 }

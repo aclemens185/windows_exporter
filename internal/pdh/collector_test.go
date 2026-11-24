@@ -322,6 +322,19 @@ func TestCollectorInitializationErrors(t *testing.T) {
 		require.NoError(t, err)
 
 		t.Cleanup(collector.Close)
+
+		// Collectors check MetricType to omit the metrics of skipped counters.
+		_, ok := collector.MetricType("Thread Count")
+		require.True(t, ok)
+
+		_, ok = collector.MetricType("No Such Counter")
+		require.False(t, ok)
+
+		// The skipped counter does not drop the instances.
+		var rows []futureCounter
+
+		require.NoError(t, collector.Collect(&rows))
+		require.NotEmpty(t, rows)
 	})
 }
 

@@ -25,6 +25,12 @@ host has connected to. These notes were recorded on a Windows Server 2025
   seconds directly truncates them and adds 2^32 seconds per wrap.
 - `Data Bytes/sec`, `Read Bytes/sec` and `Write Bytes/sec` are bytes
   (`PERF_COUNTER_BULK_COUNT`).
+- Windows Server 2016 (build 14393) has 18 counters in `SMB Client Shares`.
+  It lacks the four `... transmitted via SMB Direct/sec` counters and
+  `Turbo I/O Reads/sec` and `Turbo I/O Writes/sec`, which Windows Server 2019
+  (build 17763) has. Their fields carry `perfdata_min_build:"17763"`, and
+  the collector publishes their metrics only if `pdh.Collector.MetricType`
+  finds all six, so the zeros of skipped counters are never published.
 
 ## Counter reference
 
