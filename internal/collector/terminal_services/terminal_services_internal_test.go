@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus-community/windows_exporter/internal/pdh"
 	"github.com/prometheus-community/windows_exporter/internal/scrapecache"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -53,4 +54,58 @@ func TestCollectorWithoutSessionObject(t *testing.T) {
 				"unexpected metric %s", desc)
 		}
 	}
+}
+
+// TestNewQueryCollectorAnyInstanceType covers single-instance v2 counter sets
+// such as the Remote Desktop Connection Broker Counterset, whose wildcard
+// instance path PDH rejects. Event Tracing for Windows is such a counter set
+// on every host.
+func TestNewQueryCollectorAnyInstanceType(t *testing.T) {
+	t.Parallel()
+
+	type eventTracing struct {
+		ActiveSessions float64 `perfdata:"Total Number of Active Sessions"`
+	}
+
+	type process struct {
+		Name string
+
+		ThreadCount float64 `perfdata:"Thread Count"`
+	}
+
+	logger := slog.New(slog.DiscardHandler)
+
+	query, err := pdh.NewQuery()
+	require.NoError(t, err)
+
+	t.Cleanup(query.Close)
+
+	_, err = pdh.NewQueryCollector[eventTracing](logger, query, pdh.CounterTypeRaw, "Event Tracing for Windows", pdh.InstancesAll)
+	require.Error(t, err, "PDH accepted the wildcard path of a single-instance counter set")
+
+	singleInstance, err := newQueryCollectorAnyInstanceType[eventTracing](logger, query, "Event Tracing for Windows")
+	require.NoError(t, err)
+
+	t.Cleanup(singleInstance.Close)
+
+	multiInstance, err := newQueryCollectorAnyInstanceType[process](logger, query, "Process")
+	require.NoError(t, err)
+
+	t.Cleanup(multiInstance.Close)
+
+	_, err = newQueryCollectorAnyInstanceType[process](logger, query, "windows_exporter missing object")
+	require.Error(t, err)
+
+	require.NoError(t, query.Collect())
+
+	var eventTracingData []eventTracing
+
+	require.NoError(t, singleInstance.Collect(&eventTracingData))
+	require.Len(t, eventTracingData, 1)
+	require.Positive(t, eventTracingData[0].ActiveSessions)
+
+	var processData []process
+
+	require.NoError(t, multiInstance.Collect(&processData))
+	require.Greater(t, len(processData), 1, "the wildcard path must collect every process")
 }

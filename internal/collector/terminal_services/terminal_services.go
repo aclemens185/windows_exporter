@@ -262,7 +262,7 @@ func (c *Collector) Build(logger *slog.Logger, miSession *mi.Session) error {
 	c.connectionBrokerEnabled = isConnectionBrokerServer()
 
 	if c.connectionBrokerEnabled {
-		c.perfDataCollectorBroker, err = pdh.NewQueryCollector[perfDataCounterValuesBroker](c.logger, c.perfDataQuery, pdh.CounterTypeRaw, "Remote Desktop Connection Broker Counterset", pdh.InstancesAll)
+		c.perfDataCollectorBroker, err = newQueryCollectorAnyInstanceType[perfDataCounterValuesBroker](c.logger, c.perfDataQuery, "Remote Desktop Connection Broker Counterset")
 		if err != nil {
 			// The service can be installed while its counters are not registered or
 			// unreadable. Keep the session metrics and skip only the broker metrics.
@@ -297,6 +297,26 @@ func (c *Collector) Build(logger *slog.Logger, miSession *mi.Session) error {
 	}
 
 	return nil
+}
+
+// newQueryCollectorAnyInstanceType adds the counters of object to query for
+// all of its instances. PDH rejects the wildcard instance path of a
+// single-instance v2 counter set, such as the Remote Desktop Connection
+// Broker Counterset, with PDH_CSTATUS_BAD_COUNTERNAME, so the counters are
+// then added without an instance. The wildcard is tried first because a
+// multi-instance counter set accepts both paths while it has no instances.
+func newQueryCollectorAnyInstanceType[T any](logger *slog.Logger, query *pdh.Query, object string) (*pdh.Collector[T], error) {
+	collector, err := pdh.NewQueryCollector[T](logger, query, pdh.CounterTypeRaw, object, pdh.InstancesAll)
+	if err == nil {
+		return collector, nil
+	}
+
+	collector, singleInstanceErr := pdh.NewQueryCollector[T](logger, query, pdh.CounterTypeRaw, object, nil)
+	if singleInstanceErr == nil {
+		return collector, nil
+	}
+
+	return nil, errors.Join(err, singleInstanceErr)
 }
 
 // Collect sends the metric values for each metric
