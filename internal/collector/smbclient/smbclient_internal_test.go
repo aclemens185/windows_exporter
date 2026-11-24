@@ -7,9 +7,12 @@
 package smbclient
 
 import (
+	"log/slog"
 	"math"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,4 +84,89 @@ func TestExtendCounters32(t *testing.T) {
 
 	got = sample(perfDataCounterValues{MetadataRequestsPerSec: 3, ReadBytesPerSec: 50, DataBytesPerSec: 1000})
 	require.Equal(t, 3.0, got.MetadataRequestsPerSec) //nolint:testifylint
+}
+
+// publishCollector adapts a publish function to prometheus.Collector, so the
+// test checks the metrics as a registry gathers them.
+type publishCollector func(ch chan<- prometheus.Metric)
+
+func (publishCollector) Describe(chan<- *prometheus.Desc) {}
+
+func (p publishCollector) Collect(ch chan<- prometheus.Metric) {
+	p(ch)
+}
+
+// TestCollectSharesSMBDirectTurboIO checks that a host without the SMB Direct
+// and Turbo I/O counters, such as Windows Server 2016, publishes the other
+// metrics of a share and omits these instead of publishing zeros.
+func TestCollectSharesSMBDirectTurboIO(t *testing.T) {
+	t.Parallel()
+
+	smbDirectTurboIOMetrics := []string{
+		"windows_smbclient_read_bytes_via_smbdirect_total",
+		"windows_smbclient_read_requests_via_smbdirect_total",
+		"windows_smbclient_turbo_io_reads_total",
+		"windows_smbclient_turbo_io_writes_total",
+		"windows_smbclient_write_bytes_via_smbdirect_total",
+		"windows_smbclient_write_requests_via_smbdirect_total",
+	}
+
+	for _, smbDirectTurboIO := range []bool{true, false} {
+		c := New(nil)
+		c.logger = slog.New(slog.DiscardHandler)
+		c.unexpectedInstances = make(map[string]struct{})
+		c.counters32 = make(map[string]*shareCounters32)
+		c.smbDirectTurboIO = smbDirectTurboIO
+		c.buildDescriptors()
+
+		c.perfDataObject = []perfDataCounterValues{{
+			Name:                                   `\\fileserver\data`,
+			ReadBytesPerSec:                        100,
+			ReadBytesTransmittedViaSMBDirectPerSec: 40,
+			TurboIOReadsPerSec:                     3,
+		}}
+
+		registry := prometheus.NewPedanticRegistry()
+		require.NoError(t, registry.Register(publishCollector(c.collectShares)))
+
+		families, err := registry.Gather()
+		require.NoError(t, err)
+
+		values := make(map[string]float64, len(families))
+
+		for _, family := range families {
+			require.Len(t, family.GetMetric(), 1, family.GetName())
+
+			metric := family.GetMetric()[0]
+
+			labels := make(map[string]string, len(metric.GetLabel()))
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+
+			require.Equal(t, map[string]string{"server": "fileserver", "share": "data"}, labels, family.GetName())
+
+			if family.GetType() == dto.MetricType_COUNTER {
+				values[family.GetName()] = metric.GetCounter().GetValue()
+			} else {
+				values[family.GetName()] = metric.GetGauge().GetValue()
+			}
+		}
+
+		require.InDelta(t, 100, values["windows_smbclient_read_bytes_total"], 0)
+
+		if smbDirectTurboIO {
+			require.Len(t, values, 21)
+			require.InDelta(t, 40, values["windows_smbclient_read_bytes_via_smbdirect_total"], 0)
+			require.InDelta(t, 3, values["windows_smbclient_turbo_io_reads_total"], 0)
+
+			continue
+		}
+
+		require.Len(t, values, 21-len(smbDirectTurboIOMetrics))
+
+		for _, name := range smbDirectTurboIOMetrics {
+			require.NotContains(t, values, name)
+		}
+	}
 }

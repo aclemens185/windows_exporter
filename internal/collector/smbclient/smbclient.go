@@ -44,6 +44,10 @@ type Collector struct {
 	counters32 map[string]*shareCounters32
 	generation uint64
 
+	// smbDirectTurboIO is true if the SMB Direct and Turbo I/O counters
+	// exist. Windows Server 2016 (build 14393) lacks them.
+	smbDirectTurboIO bool
+
 	readBytesTotal                            *prometheus.Desc
 	readBytesTransmittedViaSMBDirectTotal     *prometheus.Desc
 	readRequestQueueSecsTotal                 *prometheus.Desc
@@ -107,6 +111,20 @@ func restartSignals(data *perfDataCounterValues) [numRestartSignals]float64 {
 //nolint:gochecknoglobals
 var timerCounters32 = [numTimers32]string{"Avg. sec/Read", "Avg. sec/Write", "Avg. sec/Data Request"}
 
+// smbDirectTurboIOCounters names the counters that Windows added in build
+// 17763 (Windows Server 2019). They carry perfdata_min_build in
+// perfDataCounterValues, so internal/pdh skips them on older builds.
+//
+//nolint:gochecknoglobals
+var smbDirectTurboIOCounters = [...]string{
+	"Read Bytes transmitted via SMB Direct/sec",
+	"Read Requests transmitted via SMB Direct/sec",
+	"Turbo I/O Reads/sec",
+	"Turbo I/O Writes/sec",
+	"Write Bytes transmitted via SMB Direct/sec",
+	"Write Requests transmitted via SMB Direct/sec",
+}
+
 // fields32 returns the 32-bit counters: first the PERF_AVERAGE_TIMER
 // numerators, then the request counters (PERF_COUNTER_COUNTER).
 func fields32(data *perfDataCounterValues) [numTimers32 + numCounts32]*float64 {
@@ -157,6 +175,31 @@ func (c *Collector) Build(logger *slog.Logger, _ *mi.Session) error {
 	c.unexpectedInstances = make(map[string]struct{})
 	c.counters32 = make(map[string]*shareCounters32)
 
+	c.buildDescriptors()
+
+	var err error
+
+	c.perfDataCollector, err = pdh.NewCollector[perfDataCounterValues](c.logger, pdh.CounterTypeRaw, "SMB Client Shares", pdh.InstancesAll)
+	if err != nil {
+		return fmt.Errorf("failed to create SMB Client Shares collector: %w", err)
+	}
+
+	// internal/pdh skips the SMB Direct and Turbo I/O counters on builds that
+	// lack them. Their fields then stay 0, which must not be published.
+	c.smbDirectTurboIO = true
+
+	for _, counter := range smbDirectTurboIOCounters {
+		if _, ok := c.perfDataCollector.MetricType(counter); !ok {
+			c.smbDirectTurboIO = false
+
+			break
+		}
+	}
+
+	return nil
+}
+
+func (c *Collector) buildDescriptors() {
 	// desc creates a new prometheus description
 	desc := func(metricName string, description string, labels []string) *prometheus.Desc {
 		return prometheus.NewDesc(
@@ -251,15 +294,6 @@ func (c *Collector) Build(logger *slog.Logger, _ *mi.Session) error {
 		"Seconds waiting for write requests on this share",
 		[]string{"server", "share"},
 	)
-
-	var err error
-
-	c.perfDataCollector, err = pdh.NewCollector[perfDataCounterValues](c.logger, pdh.CounterTypeRaw, "SMB Client Shares", pdh.InstancesAll)
-	if err != nil {
-		return fmt.Errorf("failed to create SMB Client Shares collector: %w", err)
-	}
-
-	return nil
 }
 
 // Collect collects smb client metrics and sends them to prometheus.
@@ -269,6 +303,13 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric, _ time.Duration) error 
 		return fmt.Errorf("failed to collect SMB Client Shares metrics: %w", err)
 	}
 
+	c.collectShares(ch)
+
+	return nil
+}
+
+// collectShares sends the metrics of the shares in c.perfDataObject.
+func (c *Collector) collectShares(ch chan<- prometheus.Metric) {
 	c.generation++
 
 	// internal/pdh converts the timer sums to seconds; extendCounters32 needs
@@ -378,23 +419,9 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric, _ time.Duration) error 
 		)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.readBytesTransmittedViaSMBDirectTotal,
-			prometheus.CounterValue,
-			data.ReadBytesTransmittedViaSMBDirectPerSec,
-			serverValue, shareValue,
-		)
-
-		ch <- prometheus.MustNewConstMetric(
 			c.readBytesTotal,
 			prometheus.CounterValue,
 			data.ReadBytesPerSec,
-			serverValue, shareValue,
-		)
-
-		ch <- prometheus.MustNewConstMetric(
-			c.readRequestsTransmittedViaSMBDirectTotal,
-			prometheus.CounterValue,
-			data.ReadRequestsTransmittedViaSMBDirectPerSec,
 			serverValue, shareValue,
 		)
 
@@ -406,37 +433,9 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric, _ time.Duration) error 
 		)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.turboIOReadsTotal,
-			prometheus.CounterValue,
-			data.TurboIOReadsPerSec,
-			serverValue, shareValue,
-		)
-
-		ch <- prometheus.MustNewConstMetric(
-			c.TurboIOWritesTotal,
-			prometheus.CounterValue,
-			data.TurboIOWritesPerSec,
-			serverValue, shareValue,
-		)
-
-		ch <- prometheus.MustNewConstMetric(
-			c.writeBytesTransmittedViaSMBDirectTotal,
-			prometheus.CounterValue,
-			data.WriteBytesTransmittedViaSMBDirectPerSec,
-			serverValue, shareValue,
-		)
-
-		ch <- prometheus.MustNewConstMetric(
 			c.writeBytesTotal,
 			prometheus.CounterValue,
 			data.WriteBytesPerSec,
-			serverValue, shareValue,
-		)
-
-		ch <- prometheus.MustNewConstMetric(
-			c.writeRequestsTransmittedViaSMBDirectTotal,
-			prometheus.CounterValue,
-			data.WriteRequestsTransmittedViaSMBDirectPerSec,
 			serverValue, shareValue,
 		)
 
@@ -446,11 +445,53 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric, _ time.Duration) error 
 			data.WriteRequestsPerSec,
 			serverValue, shareValue,
 		)
+
+		if c.smbDirectTurboIO {
+			ch <- prometheus.MustNewConstMetric(
+				c.readBytesTransmittedViaSMBDirectTotal,
+				prometheus.CounterValue,
+				data.ReadBytesTransmittedViaSMBDirectPerSec,
+				serverValue, shareValue,
+			)
+
+			ch <- prometheus.MustNewConstMetric(
+				c.readRequestsTransmittedViaSMBDirectTotal,
+				prometheus.CounterValue,
+				data.ReadRequestsTransmittedViaSMBDirectPerSec,
+				serverValue, shareValue,
+			)
+
+			ch <- prometheus.MustNewConstMetric(
+				c.turboIOReadsTotal,
+				prometheus.CounterValue,
+				data.TurboIOReadsPerSec,
+				serverValue, shareValue,
+			)
+
+			ch <- prometheus.MustNewConstMetric(
+				c.TurboIOWritesTotal,
+				prometheus.CounterValue,
+				data.TurboIOWritesPerSec,
+				serverValue, shareValue,
+			)
+
+			ch <- prometheus.MustNewConstMetric(
+				c.writeBytesTransmittedViaSMBDirectTotal,
+				prometheus.CounterValue,
+				data.WriteBytesTransmittedViaSMBDirectPerSec,
+				serverValue, shareValue,
+			)
+
+			ch <- prometheus.MustNewConstMetric(
+				c.writeRequestsTransmittedViaSMBDirectTotal,
+				prometheus.CounterValue,
+				data.WriteRequestsTransmittedViaSMBDirectPerSec,
+				serverValue, shareValue,
+			)
+		}
 	}
 
 	c.pruneCounters32()
-
-	return nil
 }
 
 // pruneCounters32 drops the state of shares missing from the last
