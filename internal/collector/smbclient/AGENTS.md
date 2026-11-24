@@ -31,6 +31,14 @@ host has connected to. These notes were recorded on a Windows Server 2025
   (build 17763) has. Their fields carry `perfdata_min_build:"17763"`, and
   the collector publishes their metrics only if `pdh.Collector.MetricType`
   finds all six, so the zeros of skipped counters are never published.
+- Windows Server 2016 also registers `SMB Client Shares` as a single-instance
+  counter set (`Get-Counter -ListSet` reports `SingleInstance`; 2019 reports
+  `MultiInstance`), although `PdhEnumObjectItems` lists the shares. The raw
+  array of a `(*)` counter then has only the items `*` and `_Total`, so
+  `internal/pdh` returns one row named `------` (`pdh.InstanceEmpty`), which
+  `parseInstanceName` rejects. Paths with an explicit instance, such as
+  `\SMB Client Shares(\SERVER\share)\Data Bytes/sec`, work; `(\*)` and
+  `(\SERVER\*)` return no data.
 
 ## Counter reference
 

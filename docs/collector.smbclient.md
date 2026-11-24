@@ -36,7 +36,7 @@ Name | Description | Type | Labels
 `windows_smbclient_read_seconds_total` | Seconds waiting for read requests on this share | counter | `server`, `share`|
 `windows_smbclient_write_seconds_total` | Seconds waiting for write requests on this share | counter | `server`, `share`|
 
-Windows Server 2016 (build 14393) has no SMB Direct and Turbo I/O counters in `SMB Client Shares`. There the collector doesn't publish `read_bytes_via_smbdirect_total`, `read_requests_via_smbdirect_total`, `write_bytes_via_smbdirect_total`, `write_requests_via_smbdirect_total`, `turbo_io_reads_total` and `turbo_io_writes_total`.
+Windows Server 2016 (build 14393) has no SMB Direct and Turbo I/O counters in `SMB Client Shares`. There the collector doesn't publish `read_bytes_via_smbdirect_total`, `read_requests_via_smbdirect_total`, `write_bytes_via_smbdirect_total`, `write_requests_via_smbdirect_total`, `turbo_io_reads_total` and `turbo_io_writes_total`. Windows Server 2016 also registers `SMB Client Shares` as a single-instance counter set, so PDH does not expand the `*` instance and the collector publishes no per-share metrics on that version.
 
 Windows keeps several raw counters at 32 bits: the time sums behind `read_seconds_total`, `write_seconds_total` and `request_seconds_total`, and the counts behind `requests_total`, `read_requests_total`, `write_requests_total`, `metadata_requests_total`, `stalls_total`, `turbo_io_reads_total`, `turbo_io_writes_total`, `read_requests_via_smbdirect_total` and `write_requests_via_smbdirect_total`. The collector extends them past 2^32 per share, so they don't drop back to a low value when the raw counter wraps. The extended value starts at the raw value and follows the raw counter when the share reconnects.
 
